@@ -691,7 +691,13 @@ router.post("/api/billing-runs/process", async (req: Request, res: Response) => 
       errorCount: 0,
     },
   };
-  await db.collection("billingRuns").doc(runId).set(runDoc);
+  try {
+    await db.collection("billingRuns").doc(runId).set(runDoc);
+  } catch (err) {
+    console.error("Failed to create billing run:", err);
+    res.status(500).json({ error: "Failed to create billing run" });
+    return;
+  }
 
   // Process billing synchronously. The run doc is already in Firestore with
   // status "running", and the UI polls every 3 seconds for progress updates,
