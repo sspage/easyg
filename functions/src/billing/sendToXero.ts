@@ -29,6 +29,10 @@ export async function sendToXero(billingRunId: string): Promise<void> {
 
   const runData = runSnap.data() as BillingRun;
 
+  if (runData.isTestRun) {
+    throw new Error("Cannot send a test run to Xero. Test runs are for verification only.");
+  }
+
   if (runData.status !== "completed") {
     throw new Error(
       `Billing run ${billingRunId} is not in completed status (current: ${runData.status})`,

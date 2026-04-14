@@ -610,7 +610,7 @@ router.post("/api/settings/xero-auth", async (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 
 router.post("/api/billing-runs/process", async (req: Request, res: Response) => {
-  const { month } = req.body;
+  const { month, isTestRun } = req.body;
   if (!month || !/^\d{6}$/.test(month)) {
     res.status(400).json({ error: "month is required in YYYYMM format" });
     return;
@@ -618,7 +618,7 @@ router.post("/api/billing-runs/process", async (req: Request, res: Response) => 
 
   try {
     const { processBilling } = await import("../billing/process");
-    const runId = await processBilling(month);
+    const runId = await processBilling(month, { isTestRun: !!isTestRun });
     const doc = await db.collection("billingRuns").doc(runId).get();
     res.json(docToJson(doc.id, doc.data()!));
   } catch (err) {

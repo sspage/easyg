@@ -149,6 +149,7 @@ export interface BillingRun {
   billingPeriod: string;
   phase: "PROCESSED" | "REVIEWED" | "SENT_TO_XERO";
   status: "running" | "completed" | "failed";
+  isTestRun: boolean;
   startedAt: string;
   completedAt: string | null;
   sentToXeroAt: string | null;
@@ -305,9 +306,13 @@ export async function getBillingRun(id: string): Promise<BillingRun> {
 }
 
 export async function processBilling(
-  month: string
+  month: string,
+  options?: { isTestRun?: boolean }
 ): Promise<BillingRun> {
-  return request<BillingRun>("POST", "/billing-runs/process", { month });
+  return request<BillingRun>("POST", "/billing-runs/process", {
+    month,
+    isTestRun: options?.isTestRun ?? false,
+  });
 }
 
 export async function sendToXero(runId: string): Promise<BillingRun> {

@@ -56,6 +56,7 @@ export interface BillingRun {
   billingPeriod: string;
   phase: BillingRunPhase;
   status: BillingRunStatus;
+  isTestRun: boolean;
   startedAt: Timestamp;
   completedAt: Timestamp | null;
   sentToXeroAt: Timestamp | null;

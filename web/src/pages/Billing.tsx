@@ -84,6 +84,7 @@ export default function Billing(): React.ReactElement {
   const [processing, setProcessing] = useState(false);
   const [sendingToXero, setSendingToXero] = useState(false);
   const [batchSending, setBatchSending] = useState(false);
+  const [isTestRun, setIsTestRun] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
@@ -109,9 +110,10 @@ export default function Billing(): React.ReactElement {
     setActionMessage(null);
     try {
       // Convert YYYY-MM to YYYYMM for the backend
-      const run = await processBilling(selectedMonth.replace("-", ""));
+      const run = await processBilling(selectedMonth.replace("-", ""), { isTestRun });
       setActiveRun(run);
-      setActionMessage(`Billing processed for ${selectedMonth}. ${run.summary.invoiceCount} invoices generated.`);
+      const label = isTestRun ? "Test run" : "Billing processed";
+      setActionMessage(`${label} for ${selectedMonth}. ${run.summary.invoiceCount} invoices generated.`);
       await loadRuns();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Processing failed");
@@ -264,7 +266,14 @@ export default function Billing(): React.ReactElement {
   ];
 
   const runColumns: Column<BillingRun>[] = [
-    { key: "billingPeriod", header: "Period", sortable: true },
+    {
+      key: "billingPeriod",
+      header: "Period",
+      sortable: true,
+      render: (row: BillingRun) => (
+        <>{row.billingPeriod}{row.isTestRun ? " " : ""}{row.isTestRun && <StatusBadge variant="warning" label="TEST" size="sm" />}</>
+      ),
+    },
     {
       key: "phase",
       header: "Phase",
@@ -389,13 +398,24 @@ export default function Billing(): React.ReactElement {
                 ))}
               </select>
             </div>
+            <div className="form-group">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={isTestRun}
+                  onChange={(e) => setIsTestRun(e.target.checked)}
+                  disabled={processing}
+                />
+                Test Run (calculation only, cannot send to Xero)
+              </label>
+            </div>
             <div className="form-group form-actions-inline">
               <button
-                className="btn btn-primary"
+                className={`btn ${isTestRun ? "btn-secondary" : "btn-primary"}`}
                 onClick={handleProcess}
                 disabled={processing}
               >
-                {processing ? "Processing..." : "Process Billing (Phase 1)"}
+                {processing ? "Processing..." : isTestRun ? "Run Test" : "Process Billing (Phase 1)"}
               </button>
             </div>
           </div>
@@ -412,9 +432,15 @@ export default function Billing(): React.ReactElement {
                 <StatusBadge variant={statusVariant(activeRun.status)} label={activeRun.status.toUpperCase()} size="sm" />
                 {" "}
                 <StatusBadge variant={phaseVariant(activeRun.phase)} label={activeRun.phase.replace(/_/g, " ")} size="sm" />
+                {activeRun.isTestRun && (
+                  <>
+                    {" "}
+                    <StatusBadge variant="warning" label="TEST RUN" size="sm" />
+                  </>
+                )}
               </h3>
               <div className="btn-group">
-                {activeRun.phase === "PROCESSED" && activeRun.status === "completed" && (
+                {!activeRun.isTestRun && activeRun.phase === "PROCESSED" && activeRun.status === "completed" && (
                   <button
                     className="btn btn-primary"
                     onClick={handleSendToXero}
@@ -423,7 +449,7 @@ export default function Billing(): React.ReactElement {
                     {sendingToXero ? "Sending..." : "Send to Xero (Phase 3)"}
                   </button>
                 )}
-                {activeRun.phase === "SENT_TO_XERO" && activeRun.status === "completed" && (
+                {!activeRun.isTestRun && activeRun.phase === "SENT_TO_XERO" && activeRun.status === "completed" && (
                   <button
                     className="btn btn-primary"
                     onClick={handleBatchSend}
@@ -431,6 +457,9 @@ export default function Billing(): React.ReactElement {
                   >
                     {batchSending ? "Approving..." : "Approve All in Xero"}
                   </button>
+                )}
+                {activeRun.isTestRun && activeRun.status === "completed" && (
+                  <span className="text-muted">Test run — review only, cannot send to Xero</span>
                 )}
               </div>
             </div>

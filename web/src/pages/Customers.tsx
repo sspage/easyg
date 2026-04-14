@@ -103,8 +103,13 @@ export default function Customers(): React.ReactElement {
   async function handleProfileChange(customerId: string, profileId: string) {
     try {
       await updateCustomer(customerId, { markupProfileId: profileId || null });
+      const profileName = profiles.find((p) => p.id === profileId)?.name || undefined;
       setCustomers((prev) =>
-        prev.map((c) => (c.id === customerId ? { ...c, markupProfileId: profileId || null } : c))
+        prev.map((c) =>
+          c.id === customerId
+            ? { ...c, markupProfileId: profileId || null, markupProfileName: profileName } as Customer
+            : c
+        )
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update customer");

@@ -170,7 +170,10 @@ async function loadCustomers(): Promise<
 // BigQuery query
 // ---------------------------------------------------------------------------
 
-async function queryBillingData(billingMonth: string): Promise<BqBillingRow[]> {
+const HISTORICAL_TABLE = "reseller_billing_historical_v1";
+
+async function queryBillingData(billingMonth: string, useHistorical = false): Promise<BqBillingRow[]> {
+  const table = useHistorical ? HISTORICAL_TABLE : BILLING_TABLE;
   const query = `
     SELECT
       customer_name,
@@ -185,7 +188,7 @@ async function queryBillingData(billingMonth: string): Promise<BqBillingRow[]> {
       payer_billing_account_id,
       credits,
       entitlement_name
-    FROM \`${PROJECT_ID}.${DATASET_ID}.${BILLING_TABLE}\`
+    FROM \`${PROJECT_ID}.${DATASET_ID}.${table}\`
     WHERE invoice.month = @billingMonth
   `;
 
@@ -312,7 +315,12 @@ function resolveMarkup(
 // Main processing function
 // ---------------------------------------------------------------------------
 
-export async function processBilling(billingMonth: string): Promise<string> {
+export async function processBilling(
+  billingMonth: string,
+  options: { isTestRun?: boolean } = {},
+): Promise<string> {
+  const isTestRun = options.isTestRun ?? false;
+
   // Validate format.
   if (!/^\d{6}$/.test(billingMonth)) {
     throw new Error(
@@ -328,6 +336,7 @@ export async function processBilling(billingMonth: string): Promise<string> {
     billingPeriod: billingMonth,
     phase: "PROCESSED",
     status: "running",
+    isTestRun,
     startedAt: Timestamp.now(),
     completedAt: null,
     sentToXeroAt: null,
@@ -345,16 +354,29 @@ export async function processBilling(billingMonth: string): Promise<string> {
   await runRef.set(runData);
 
   try {
+    // For test runs, try the live table first, fall back to historical.
+    // For real runs, only use the live table.
+    let billingRows: BqBillingRow[];
+    const liveRows = await queryBillingData(billingMonth, false);
+    if (liveRows.length > 0) {
+      billingRows = liveRows;
+    } else if (isTestRun) {
+      billingRows = await queryBillingData(billingMonth, true);
+      if (billingRows.length === 0) {
+        throw new Error(`No billing data found for ${billingMonth} in live or historical tables.`);
+      }
+    } else {
+      throw new Error(`No billing data found for ${billingMonth}.`);
+    }
+
     // Load reference data in parallel.
     const [
-      rows,
       allProfiles,
       defaultProfile,
       overrides,
       skuMappings,
       existingCustomers,
     ] = await Promise.all([
-      queryBillingData(billingMonth),
       loadMarkupProfiles(),
       loadDefaultProfile(),
       loadCustomerOverrides(billingMonth),
@@ -362,13 +384,7 @@ export async function processBilling(billingMonth: string): Promise<string> {
       loadCustomers(),
     ]);
 
-    if (rows.length === 0) {
-      await runRef.update({
-        status: "completed",
-        completedAt: Timestamp.now(),
-      });
-      return runId;
-    }
+    const rows = billingRows;
 
     // -----------------------------------------------------------------------
     // Phase 1a: Process each row, compute aggregates.
