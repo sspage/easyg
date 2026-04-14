@@ -67,7 +67,10 @@
       "Bash(gcloud functions:*)",
       "Bash(GOOGLE_APPLICATION_CREDENTIALS=\"\" gcloud firestore documents list --collection-ids=billingRuns --project=white-dispatch-481617-f8 --limit=10)",
       "Bash(python3 -c ':*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(FUNCTIONS_DISCOVERY_TIMEOUT=60000 firebase deploy --only functions:xeroCallback --project white-dispatch-481617-f8)",
+      "Bash(firebase functions:delete processBilling --region us-central1 --project white-dispatch-481617-f8 --force)",
+      "Bash(firebase functions:delete sendToXero --region us-central1 --project white-dispatch-481617-f8 --force)"
     ]
   }
 }

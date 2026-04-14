@@ -145,7 +145,7 @@ export async function getXeroClient(): Promise<XeroClient> {
  * and Firestore, and return the tenant ID.
  */
 export async function handleCallback(
-  code: string,
+  fullCallbackUrl: string,
   redirectUri: string,
 ): Promise<string> {
   const [clientId, clientSecret] = await Promise.all([
@@ -168,7 +168,11 @@ export async function handleCallback(
     ],
   });
 
-  const tokenSet = await xero.apiCallback(code);
+  // Must initialize the OpenID client before calling apiCallback
+  await xero.initialize();
+
+  // apiCallback expects the full callback URL (not just the code)
+  const tokenSet = await xero.apiCallback(fullCallbackUrl);
 
   if (!tokenSet.refresh_token) {
     throw new Error("No refresh token received from Xero");

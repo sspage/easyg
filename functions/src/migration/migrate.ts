@@ -1,19 +1,20 @@
 import * as admin from "firebase-admin";
 import { BigQuery } from "@google-cloud/bigquery";
 
-// Initialize Firebase Admin
-admin.initializeApp({
-  projectId: "white-dispatch-481617-f8",
-});
+// Uses Application Default Credentials (ADC).
+// Set GOOGLE_CLOUD_PROJECT env var or run with gcloud auth application-default login.
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "white-dispatch-481617-f8";
+
+admin.initializeApp({ projectId: PROJECT_ID });
 
 const db = admin.firestore();
-const bq = new BigQuery({ projectId: "white-dispatch-481617-f8" });
+const bq = new BigQuery({ projectId: PROJECT_ID });
 
 async function migrateMarkupRules() {
   console.log("Migrating markup rules -> markupProfiles...");
 
   const [rows] = await bq.query({
-    query: `SELECT * FROM \`white-dispatch-481617-f8.billing.markup_rules\` WHERE is_active = TRUE ORDER BY priority`,
+    query: `SELECT * FROM \`${PROJECT_ID}.billing.markup_rules\` WHERE is_active = TRUE ORDER BY priority`,
   });
 
   // Group rules by subscription_type to build the default profile
@@ -57,7 +58,7 @@ async function migrateSkuMappings(skuRules: Array<{ skuId: string; markupFactor:
   console.log("Migrating sku_to_xero_account -> skuMappings...");
 
   const [rows] = await bq.query({
-    query: `SELECT * FROM \`white-dispatch-481617-f8.billing.sku_to_xero_account\` WHERE is_active = TRUE`,
+    query: `SELECT * FROM \`${PROJECT_ID}.billing.sku_to_xero_account\` WHERE is_active = TRUE`,
   });
 
   const batch = db.batch();
@@ -89,7 +90,7 @@ async function migrateCustomers() {
   console.log("Migrating customer_to_xero_contact -> customers...");
 
   const [rows] = await bq.query({
-    query: `SELECT * FROM \`white-dispatch-481617-f8.billing.customer_to_xero_contact\` WHERE is_active = TRUE`,
+    query: `SELECT * FROM \`${PROJECT_ID}.billing.customer_to_xero_contact\` WHERE is_active = TRUE`,
   });
 
   // Also get unique customers from billing_new to fill in any gaps
@@ -98,7 +99,7 @@ async function migrateCustomers() {
       SELECT DISTINCT
         customer_name,
         (SELECT value FROM UNNEST(system_labels) WHERE key = 'workspace.googleapis.com/domain_name' LIMIT 1) as domain
-      FROM \`white-dispatch-481617-f8.billing_new.reseller_billing_detailed_export_v1\`
+      FROM \`${PROJECT_ID}.billing_new.reseller_billing_detailed_export_v1\`
     `,
   });
 
@@ -176,7 +177,7 @@ async function migrateSubscriptionOverrides() {
   console.log("Migrating subscription_overrides -> customerOverrides...");
 
   const [rows] = await bq.query({
-    query: `SELECT * FROM \`white-dispatch-481617-f8.billing.subscription_overrides\``,
+    query: `SELECT * FROM \`${PROJECT_ID}.billing.subscription_overrides\``,
   });
 
   if (rows.length === 0) {
@@ -210,7 +211,7 @@ async function migrateTrackingCategories() {
   console.log("Migrating tracking_categories -> settings/xero...");
 
   const [rows] = await bq.query({
-    query: `SELECT * FROM \`white-dispatch-481617-f8.billing.tracking_categories\` WHERE is_active = TRUE`,
+    query: `SELECT * FROM \`${PROJECT_ID}.billing.tracking_categories\` WHERE is_active = TRUE`,
   });
 
   const categories: Record<string, Array<{ optionKey: string; xeroTrackingOption: string }>> = {};

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { db } from "../config";
+import { db, PROJECT_ID, DATASET_ID, BILLING_TABLE, XERO_CALLBACK_URL } from "../config";
 import { Timestamp, FieldPath } from "firebase-admin/firestore";
 
 const router = Router();
@@ -334,13 +334,13 @@ crudRoutes("/api/sku-mappings", "skuMappings", {
 router.post("/api/sku-mappings/refresh", async (_req: Request, res: Response) => {
   try {
     const { BigQuery } = await import("@google-cloud/bigquery");
-    const bq = new BigQuery({ projectId: "white-dispatch-481617-f8" });
+    const bq = new BigQuery({ projectId: PROJECT_ID });
 
     const [rows] = await bq.query({
       query: `SELECT DISTINCT
         COALESCE(sku.id, 'GOOGLE_VOICE_USAGE') AS sku_id,
         COALESCE(sku.description, 'Google Voice (Usage)') AS sku_name
-      FROM \`white-dispatch-481617-f8.billing_new.reseller_billing_detailed_export_v1\``,
+      FROM \`${PROJECT_ID}.${DATASET_ID}.${BILLING_TABLE}\``,
     });
 
     const existingSnap = await db.collection("skuMappings").get();
@@ -640,7 +640,7 @@ router.post("/api/settings/xero-auth", async (req: Request, res: Response) => {
     const { getSecret } = await import("../xero/auth");
     const crypto = await import("crypto");
     const clientId = await getSecret("xero-client-id");
-    const redirectUri = "https://xerocallback-mkcuchvdya-uc.a.run.app";
+    const redirectUri = XERO_CALLBACK_URL;
     const scopes = "openid profile email offline_access accounting.invoices accounting.contacts accounting.settings";
 
     // Generate CSRF state token and store in Firestore

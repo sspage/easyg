@@ -19,18 +19,21 @@ Serverless on Google Cloud / Firebase:
 
 | Resource | URL |
 |----------|-----|
-| Web App | https://white-dispatch-481617-f8.web.app |
+| Web App (custom domain) | https://markup.easygcloud.com |
+| Web App (Firebase) | https://white-dispatch-481617-f8.web.app |
 | API Function | https://api-mkcuchvdya-uc.a.run.app |
 | Xero OAuth Callback | https://xerocallback-mkcuchvdya-uc.a.run.app |
 
+DNS for `markup.easygcloud.com` is managed in Cloudflare (controlled by Doug).
+
 ### Cloud Functions
+
+Only two functions deployed (consolidated from the original four):
 
 | Function | Purpose |
 |----------|---------|
-| `api` | Express API serving all CRUD and billing action endpoints |
-| `processBilling` | Standalone billing processor (also called by api route) |
-| `sendToXero` | Push draft invoices/bills to Xero |
-| `xeroCallback` | Xero OAuth2 redirect handler |
+| `api` | Express API handling all authenticated operations: CRUD, billing processing, Xero push |
+| `xeroCallback` | Xero OAuth2 redirect handler (public, no Firebase Auth — separate because Xero redirects here directly) |
 
 ## GCP Project
 
@@ -42,7 +45,7 @@ Serverless on Google Cloud / Firebase:
 | Region | us-central1 (functions), us-east1 (Firestore) |
 | Organization ID | 312660871352 |
 
-The GCP project is controlled by Doug at easyG Cloud (`devgc@easygcloud.com`).
+The GCP project is controlled by Doug at easyG Cloud (`hello@easygcloud.com`).
 
 ### BigQuery
 
@@ -65,7 +68,7 @@ The GCP project is controlled by Doug at easyG Cloud (`devgc@easygcloud.com`).
 | OAuth Callback | https://xerocallback-mkcuchvdya-uc.a.run.app |
 | Scopes | `openid profile email offline_access accounting.invoices accounting.contacts accounting.settings` |
 
-The Xero developer app is controlled by Doug. Apps created after March 2, 2026 must use **granular scopes** (e.g., `accounting.invoices` instead of the deprecated `accounting.transactions`). See `docs/` and memory files for details.
+The Xero developer app is controlled by Doug (`support@easygcloud.com`). Apps created after March 2, 2026 must use **granular scopes** (e.g., `accounting.invoices` instead of the deprecated `accounting.transactions`). See `docs/` and memory files for details.
 
 Token refresh is automatic -- the system refreshes the OAuth token at the start of any billing action. If the token has been inactive for >60 days, the UI prompts for re-authentication.
 
@@ -140,6 +143,29 @@ cd web && npm install && npm run dev
 
 The Vite dev server proxies `/api` to the local functions emulator.
 
+### Configuration
+
+All backend configuration lives in `functions/src/config.ts` with environment variable overrides:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `GCLOUD_PROJECT` | `white-dispatch-481617-f8` | GCP project ID |
+| `BQ_DATASET` | `billing_new` | BigQuery dataset |
+| `FUNCTION_REGION` | `us-central1` | Cloud Functions region |
+| `ALLOWED_DOMAIN` | `easygcloud.com` | Auth domain restriction |
+| `APP_DOMAIN` | `markup.easygcloud.com` | Public app domain |
+| `XERO_CALLBACK_URL` | `https://xerocallback-mkcuchvdya-uc.a.run.app` | Xero OAuth redirect (must match Xero app config) |
+
+Frontend configuration is in `web/.env.production`:
+
+| Variable | Purpose |
+|----------|---------|
+| `VITE_API_URL` | Cloud Functions API URL |
+| `VITE_ALLOWED_DOMAIN` | Auth domain restriction (UX only, enforced server-side) |
+| `VITE_PROJECT_ID` | Displayed in Settings page |
+
+Firebase web config (apiKey, appId, etc.) is in `web/src/services/firebase.ts`. These are public values by design.
+
 ### Deploying
 
 ```bash
@@ -182,8 +208,8 @@ codex exec -s read-only "Review the uncommitted changes in this repository. Prov
 
 | Service | Controlled By | Notes |
 |---------|---------------|-------|
-| **GCP Project** | Doug (`devgc@easygcloud.com`) | Billing, IAM, all cloud resources |
-| **Xero Developer App** | Doug | OAuth app for API access to easyG Cloud Xero org |
+| **GCP Project** | Doug (`hello@easygcloud.com`), dev account: `devgc@easygcloud.com` | Billing, IAM, all cloud resources |
+| **Xero Developer App** | Doug (`support@easygcloud.com`) | OAuth app for API access to easyG Cloud Xero org |
 | **GitHub Repo** | Doug (`sspage/easyg`) | Source code repository |
 | **Cloudflare DNS** | Doug | DNS hosting for easygcloud.com domain |
 | **Firebase** | Linked to GCP project | Console: https://console.firebase.google.com/project/white-dispatch-481617-f8 |

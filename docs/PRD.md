@@ -297,7 +297,7 @@ All configuration and state in Firestore. BigQuery is read-only (source data).
 | Component | Service | Cost |
 |-----------|---------|------|
 | Frontend | Firebase Hosting (static SPA) | Free tier |
-| API | Cloud Functions (Node.js or Python) | Free tier (2M invocations/month) |
+| API | Cloud Functions (2nd gen, Node.js 22) — 2 functions: `api` + `xeroCallback` | Free tier (2M invocations/month) |
 | Config/State | Firestore (us-east1, native mode) | Free tier (1 GiB storage, 50K reads/day) |
 | Billing Data | BigQuery (`billing_new`) | Minimal (Google populates; we query ~once/month) |
 | Secrets | Secret Manager | Free tier (6 active versions) |
@@ -305,13 +305,15 @@ All configuration and state in Firestore. BigQuery is read-only (source data).
 | Auth | Firebase Auth (Google sign-in, restricted to `@easygcloud.com`) | Free tier |
 
 **Deployed URLs:**
-- Web app: `https://white-dispatch-481617-f8.web.app`
-- API function: `https://api-mkcuchvdya-uc.a.run.app`
-- Xero OAuth callback: `https://xerocallback-mkcuchvdya-uc.a.run.app`
+- Web app: `https://markup.easygcloud.com` (custom domain) / `https://white-dispatch-481617-f8.web.app` (Firebase)
+- API function: configured in `web/.env.production` (VITE_API_URL)
+- Xero OAuth callback: configured in `functions/src/config.ts` (XERO_CALLBACK_URL)
 
 **Expected monthly cost: $0** for normal operation. BigQuery on-demand queries for one month of ~20K rows are well under the 1 TB/month free tier.
 
 **Note on Xero scopes:** Apps created after March 2, 2026 must use granular scopes. We use `accounting.invoices` (not the deprecated `accounting.transactions`), plus `accounting.contacts` and `accounting.settings` which are unchanged.
+
+**Authentication patterns:** All GCP services (BigQuery, Firestore, Secret Manager) use Application Default Credentials (ADC) — no service account keys in the codebase. Xero OAuth tokens are managed in Secret Manager with automatic refresh. All configurable values are centralized in `functions/src/config.ts` with environment variable overrides.
 
 ## 9. Migration & Cleanup Plan
 

@@ -22,7 +22,7 @@ export default function App(): React.ReactElement {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
 
-  const ALLOWED_DOMAIN = "easygcloud.com";
+  const ALLOWED_DOMAIN = import.meta.env.VITE_ALLOWED_DOMAIN || "easygcloud.com";
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {

@@ -55,15 +55,15 @@ These APIs are enabled but have no active resources. They were likely enabled by
 
 | # | Service | Resource | Purpose | Cost |
 |---|---------|----------|---------|------|
-| 1 | **Firebase Hosting** | Static SPA site | Web UI for Doug — dashboard, customer management, markup profiles, billing runs, settings | Free tier (10 GB/month transfer, 1 GB storage) |
-| 2 | **Firebase Auth** | Authentication | Secure admin access to the web UI (email/password or Google sign-in) | Free tier (50K MAU) |
-| 3 | **Cloud Firestore** | Database | All configuration and state: markup profiles, customer mappings, SKU mappings, billing run history, line items, Xero connection state | Free tier (1 GiB storage, 50K reads/day, 20K writes/day) |
-| 4 | **Cloud Functions (2nd gen)** | `processBilling` | Main billing function (Phase 1): reads BQ, applies markups from Firestore, stores draft invoices. Auto-refreshes Xero token before API calls. Triggered by user from UI (future: opt-in Cloud Scheduler). | Free tier (2M invocations/month, 400K GB-seconds) |
-| 5 | **Cloud Functions (2nd gen)** | `sendToXero` | Phase 3 function: pushes approved drafts to Xero as DRAFT invoices + bills. Auto-refreshes Xero token before API calls. Triggered by user from UI. | Free tier |
-| 6 | **Cloud Functions (2nd gen)** | `xeroCallback` | Xero OAuth callback handler for re-auth flow from UI | Free tier |
-| 7 | **Cloud Functions (2nd gen)** | `api` | API layer for web UI — CRUD for profiles, customers, overrides, SKU mappings, billing run state, settings | Free tier |
-| 8 | **Firestore API** | (enable) | Required for Firestore access | No cost |
-| 9 | **Firebase** | Project link | Link existing GCP project to Firebase | No cost |
+| 1 | **Firebase Hosting** | Static SPA at `markup.easygcloud.com` | Web UI — dashboard, customer management, markup profiles, billing runs, settings | Free tier (10 GB/month transfer, 1 GB storage) |
+| 2 | **Firebase Auth** | Authentication | Google sign-in, restricted to `@easygcloud.com` | Free tier (50K MAU) |
+| 3 | **Cloud Firestore** | Database (us-east1) | All configuration and state: markup profiles, customer mappings, SKU mappings, billing run history, line items, Xero connection state | Free tier (1 GiB storage, 50K reads/day, 20K writes/day) |
+| 4 | **Cloud Functions (2nd gen)** | `api` | Consolidated Express API handling all authenticated operations: CRUD, billing processing (Phase 1), Xero push (Phase 3), settings. 1 GiB / 540s timeout. | Free tier (2M invocations/month, 400K GB-seconds) |
+| 5 | **Cloud Functions (2nd gen)** | `xeroCallback` | Xero OAuth callback (public, no Firebase Auth — separate because Xero redirects here directly). 512 MiB / 60s timeout. | Free tier |
+| 6 | **Firestore API** | (enable) | Required for Firestore access | No cost |
+| 7 | **Firebase** | Project link | Link existing GCP project to Firebase | No cost |
+
+**Note on authentication:** All services use Application Default Credentials (ADC). No service account keys or hardcoded credentials in the codebase. Cloud Functions automatically receive ADC from the compute service account. Xero OAuth tokens are managed in Secret Manager. All configurable values (project ID, dataset, domain, callback URLs) are centralized in `functions/src/config.ts` with environment variable overrides.
 
 **Scheduling:** Cloud Scheduler is deployed and configured but **disabled by default**. The user enables it via a toggle in Settings. When enabled, it auto-runs Phase 1 (Process) only — Phases 2 (Review) and 3 (Send to Xero) always require user action.
 
@@ -74,52 +74,40 @@ These APIs are enabled but have no active resources. They were likely enabled by
 ## Architecture Diagram
 
 ```
-                        ┌─────────────────────────┐
-                        │    Firebase Hosting      │
-                        │    (Static SPA)          │
-                        └────────────┬────────────┘
-                                     │
-                                     ▼
-                        ┌─────────────────────────┐
-                        │   Cloud Functions        │
-                        │   api (HTTP)             │
-                        │   ┌───────────────────┐  │
-                        │   │ Markup Profiles    │  │
-                        │   │ Customer Mgmt     │  │
-                        │   │ SKU Mappings      │  │
-                        │   │ Billing Runs      │  │
-                        │   │ Settings/Auth     │  │
-                        │   └───────────────────┘  │
-                        └──┬──────────┬──────────┬─┘
-                           │          │          │
-              ┌────────────┘          │          └────────────┐
-              ▼                       ▼                       ▼
-┌──────────────────────┐ ┌──────────────────────┐ ┌──────────────────────┐
-│     Firestore        │ │      BigQuery         │ │     Xero API         │
-│                      │ │                       │ │                      │
-│ - Markup Profiles    │ │ billing_new.          │ │ - Draft Invoices     │
-│ - Customers          │ │ reseller_billing_     │ │ - Draft Bills        │
-│ - SKU Mappings       │ │ detailed_export_v1    │ │ - Contacts           │
-│ - Overrides          │ │ (read-only)           │ │ - Account Codes      │
-│ - Billing Runs       │ │                       │ │                      │
-│ - Line Items         │ │ ◄── Google exports    │ │                      │
-│ - Settings           │ │     daily (automatic) │ │                      │
-└──────────────────────┘ └──────────────────────┘ └──────────┬───────────┘
-                                                              │
-                                                              ▼
-                                                  ┌──────────────────────┐
-                                                  │   Secret Manager     │
-                                                  │                      │
-                                                  │ - xero-client-id     │
-                                                  │ - xero-client-secret │
-                                                  │ - xero-refresh-token │
-                                                  │ - xero-tenant-id     │
-                                                  └──────────────────────┘
+          markup.easygcloud.com
+                  │
+                  ▼
+  ┌─────────────────────────┐
+  │    Firebase Hosting      │
+  │    (Static React SPA)    │
+  └────────────┬────────────┘
+               │
+               ▼
+  ┌─────────────────────────┐      ┌──────────────────────┐
+  │   Cloud Function: api    │      │  CF: xeroCallback    │
+  │   (all authenticated     │      │  (public OAuth       │
+  │    operations)           │      │   redirect)          │
+  │                          │      └──────────────────────┘
+  │  - CRUD (profiles,       │
+  │    customers, SKUs)      │
+  │  - Billing processing    │
+  │  - Send to Xero          │
+  │  - Settings              │
+  └──┬──────────┬──────────┬─┘
+     │          │          │
+     ▼          ▼          ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
+│Firestore │ │ BigQuery  │ │ Xero API │ │Secret Manager│
+│          │ │           │ │          │ │              │
+│Config,   │ │billing_new│ │Invoices, │ │Xero OAuth    │
+│state,    │ │(read-only,│ │bills,    │ │credentials   │
+│billing   │ │auto daily │ │contacts  │ │(ADC access)  │
+│runs      │ │export)    │ │          │ │              │
+└──────────┘ └──────────┘ └──────────┘ └──────────────┘
 
-        ┌──────────────────┐         ┌─────────────────────────┐
-        │  Cloud Scheduler │ ·····▶  │  Cloud Functions         │
-        │  (future opt-in) │         │  processBilling (HTTP)   │
-        └──────────────────┘         └─────────────────────────┘
+All services use Application Default Credentials (ADC).
+No service account keys in the codebase.
+Cloud Scheduler (opt-in) targets the api function's /api/billing-runs/process route.
 
 Note: Default mode is user-initiated from the UI.
 Cloud Scheduler is deployed but disabled by default (opt-in via Settings).
@@ -156,8 +144,8 @@ When enabled, only auto-runs Phase 1. Phases 2+3 always require user action.
 | 3 | Enable Firebase Hosting | Step 1 |
 | 4 | Enable Firebase Auth, configure provider | Step 1 |
 | 5 | Migrate seed data from BQ `billing` tables into Firestore | Step 2 |
-| 6 | Deploy Cloud Functions (api, processBilling, sendToXero, xeroCallback) | Step 2 |
-| 7 | Deploy new Cloud Scheduler targeting processBilling (paused/disabled) | Step 6 |
+| 6 | Deploy Cloud Functions (api, xeroCallback) | Step 2 |
+| 7 | Deploy Cloud Scheduler targeting api function's /api/billing-runs/process route (paused/disabled) | Step 6 |
 | 8 | Deploy web UI to Firebase Hosting | Steps 3, 4, 6 |
 | 9 | Re-authenticate Xero via UI OAuth flow | Step 8 |
 

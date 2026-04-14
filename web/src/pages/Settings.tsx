@@ -235,7 +235,7 @@ export default function Settings(): React.ReactElement {
           <div className="info-grid">
             <div className="info-item">
               <span className="info-label">Project ID</span>
-              <span className="info-value mono-text">white-dispatch-481617-f8</span>
+              <span className="info-value mono-text">{import.meta.env.VITE_PROJECT_ID || "white-dispatch-481617-f8"}</span>
             </div>
             <div className="info-item">
               <span className="info-label">BigQuery Dataset</span>

@@ -1,6 +1,8 @@
 import { auth } from "./firebase";
 
-const FUNCTIONS_URL = "https://api-mkcuchvdya-uc.a.run.app";
+// API URL comes from environment variable (set in .env.production)
+// In dev, Vite proxies /api to the local functions emulator
+const FUNCTIONS_URL = import.meta.env.VITE_API_URL || "";
 const BASE_URL = import.meta.env.DEV ? "/api" : `${FUNCTIONS_URL}/api`;
 
 async function getHeaders(): Promise<Record<string, string>> {

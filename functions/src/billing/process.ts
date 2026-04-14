@@ -1,5 +1,5 @@
 import { BigQuery } from "@google-cloud/bigquery";
-import { db, PROJECT_ID, DATASET_ID, BILLING_TABLE } from "../config";
+import { db, PROJECT_ID, DATASET_ID, BILLING_TABLE, HISTORICAL_TABLE } from "../config";
 import { Timestamp, FieldValue } from "firebase-admin/firestore";
 import {
   BqBillingRow,
@@ -171,7 +171,7 @@ async function loadCustomers(): Promise<
 // BigQuery query
 // ---------------------------------------------------------------------------
 
-const HISTORICAL_TABLE = "reseller_billing_historical_v1";
+// HISTORICAL_TABLE imported from config
 
 async function queryBillingData(billingMonth: string, useHistorical = false): Promise<BqBillingRow[]> {
   const table = useHistorical ? HISTORICAL_TABLE : BILLING_TABLE;
