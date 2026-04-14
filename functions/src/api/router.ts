@@ -434,6 +434,60 @@ router.get("/api/billing-runs/:id", async (req: Request, res: Response) => {
   }
 });
 
+// DELETE billing run and all sub-collections
+router.delete("/api/billing-runs/:id", async (req: Request, res: Response) => {
+  try {
+    const runId = req.params.id as string;
+    const runRef = db.collection("billingRuns").doc(runId);
+    const runDoc = await runRef.get();
+    if (!runDoc.exists) {
+      res.status(404).json({ error: "Billing run not found" });
+      return;
+    }
+    if (runDoc.data()?.status === "running") {
+      res.status(409).json({ error: "Cannot delete a run that is still processing." });
+      return;
+    }
+
+    // Delete line items and invoices sub-collections
+    const invoicesSnap = await runRef.collection("invoices").get();
+    const batches: FirebaseFirestore.WriteBatch[] = [];
+    let currentBatch = db.batch();
+    let opCount = 0;
+
+    for (const invoiceDoc of invoicesSnap.docs) {
+      const lineItemsSnap = await invoiceDoc.ref.collection("lineItems").get();
+      for (const liDoc of lineItemsSnap.docs) {
+        currentBatch.delete(liDoc.ref);
+        opCount++;
+        if (opCount >= 400) {
+          batches.push(currentBatch);
+          currentBatch = db.batch();
+          opCount = 0;
+        }
+      }
+      currentBatch.delete(invoiceDoc.ref);
+      opCount++;
+      if (opCount >= 400) {
+        batches.push(currentBatch);
+        currentBatch = db.batch();
+        opCount = 0;
+      }
+    }
+    currentBatch.delete(runRef);
+    batches.push(currentBatch);
+
+    for (const b of batches) {
+      await b.commit();
+    }
+
+    res.json({ id: runId, deleted: true });
+  } catch (err) {
+    console.error("DELETE /api/billing-runs/:id error:", err);
+    res.status(500).json({ error: "Failed to delete billing run" });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // System Settings
 // ---------------------------------------------------------------------------
@@ -616,14 +670,46 @@ router.post("/api/billing-runs/process", async (req: Request, res: Response) => 
     return;
   }
 
+  // Create the run document immediately and return it.
+  // Processing happens in the background so the client doesn't time out.
+  const runId = db.collection("billingRuns").doc().id;
+  const runDoc = {
+    billingPeriod: month,
+    phase: "PROCESSING",
+    status: "running",
+    isTestRun: !!isTestRun,
+    startedAt: Timestamp.now(),
+    completedAt: null,
+    sentToXeroAt: null,
+    triggeredBy: "manual" as const,
+    summary: {
+      customerCount: 0,
+      invoiceCount: 0,
+      totalRevenue: 0,
+      totalCost: 0,
+      totalMargin: 0,
+      errorCount: 0,
+    },
+  };
+  await db.collection("billingRuns").doc(runId).set(runDoc);
+
+  // Process billing synchronously. The run doc is already in Firestore with
+  // status "running", and the UI polls every 3 seconds for progress updates,
+  // so the user sees real-time status even though this request takes a while.
+  // The 540s function timeout is sufficient for our data volumes.
   try {
     const { processBilling } = await import("../billing/process");
-    const runId = await processBilling(month, { isTestRun: !!isTestRun });
-    const doc = await db.collection("billingRuns").doc(runId).get();
-    res.json(docToJson(doc.id, doc.data()!));
+    await processBilling(month, { isTestRun: !!isTestRun, existingRunId: runId });
+    const completedDoc = await db.collection("billingRuns").doc(runId).get();
+    res.json(docToJson(runId, completedDoc.data()!));
   } catch (err) {
-    console.error("POST /api/billing-runs/process error:", err);
+    console.error("Billing processing failed:", err);
     const message = err instanceof Error ? err.message : "Billing processing failed";
+    await db.collection("billingRuns").doc(runId).set({
+      status: "failed",
+      completedAt: Timestamp.now(),
+      errorMessage: message,
+    }, { merge: true });
     res.status(500).json({ error: message });
   }
 });

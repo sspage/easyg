@@ -51,7 +51,8 @@ const DEFAULT_COS_ACCOUNT = "5000";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function extractCustomerId(customerName: string): string {
+function extractCustomerId(customerName: string | null): string {
+  if (!customerName) return "UNKNOWN";
   const match = customerName.match(/\/customers\/(.+)$/);
   return match ? match[1] : customerName;
 }
@@ -74,10 +75,10 @@ function isVoiceSku(row: BqBillingRow): boolean {
 
 function netCost(row: BqBillingRow): number {
   const creditsSum = (row.credits ?? []).reduce(
-    (sum, c) => sum + (c.amount ?? 0),
+    (sum, c) => sum + Number(c.amount ?? 0),
     0,
   );
-  return row.cost + creditsSum;
+  return Number(row.cost) + creditsSum;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +199,19 @@ async function queryBillingData(billingMonth: string, useHistorical = false): Pr
     location: "US",
   });
 
-  return rows as BqBillingRow[];
+  // BigQuery returns numeric fields as Big objects — convert everything to plain numbers
+  return rows.map((row: Record<string, unknown>) => ({
+    ...row,
+    cost: Number(row.cost ?? 0),
+    cost_at_list: Number(row.cost_at_list ?? 0),
+    usage: row.usage ? {
+      ...(row.usage as Record<string, unknown>),
+      amount: Number((row.usage as Record<string, unknown>).amount ?? 0),
+    } : { amount: 0, unit: "", amount_in_pricing_unit: 0, pricing_unit: "" },
+    credits: Array.isArray(row.credits)
+      ? row.credits.map((c: Record<string, unknown>) => ({ ...c, amount: Number(c.amount ?? 0) }))
+      : [],
+  })) as unknown as BqBillingRow[];
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +330,7 @@ function resolveMarkup(
 
 export async function processBilling(
   billingMonth: string,
-  options: { isTestRun?: boolean } = {},
+  options: { isTestRun?: boolean; existingRunId?: string } = {},
 ): Promise<string> {
   const isTestRun = options.isTestRun ?? false;
 
@@ -328,32 +341,39 @@ export async function processBilling(
     );
   }
 
-  // Create billing run document.
-  const runRef = db.collection("billingRuns").doc();
-  const runId = runRef.id;
+  // Use existing run document if provided (async mode), otherwise create one.
+  const runId = options.existingRunId || db.collection("billingRuns").doc().id;
+  const runRef = db.collection("billingRuns").doc(runId);
 
-  const runData: BillingRun = {
-    billingPeriod: billingMonth,
-    phase: "PROCESSED",
-    status: "running",
-    isTestRun,
-    startedAt: Timestamp.now(),
-    completedAt: null,
-    sentToXeroAt: null,
-    triggeredBy: "manual",
-    summary: {
-      customerCount: 0,
-      invoiceCount: 0,
-      totalRevenue: 0,
-      totalCost: 0,
-      totalMargin: 0,
-      errorCount: 0,
-    },
-  };
+  if (!options.existingRunId) {
+    const runData: BillingRun = {
+      billingPeriod: billingMonth,
+      phase: "PROCESSING",
+      status: "running",
+      isTestRun,
+      startedAt: Timestamp.now(),
+      completedAt: null,
+      sentToXeroAt: null,
+      triggeredBy: "manual",
+      summary: {
+        customerCount: 0,
+        invoiceCount: 0,
+        totalRevenue: 0,
+        totalCost: 0,
+        totalMargin: 0,
+        errorCount: 0,
+      },
+    };
+    await runRef.set(runData);
+  }
 
-  await runRef.set(runData);
+  async function updateProgress(msg: string) {
+    await runRef.update({ progress: msg });
+  }
 
   try {
+    await updateProgress("Querying billing data from BigQuery...");
+
     // For test runs, try the live table first, fall back to historical.
     // For real runs, only use the live table.
     let billingRows: BqBillingRow[];
@@ -361,6 +381,7 @@ export async function processBilling(
     if (liveRows.length > 0) {
       billingRows = liveRows;
     } else if (isTestRun) {
+      await updateProgress("No live data, checking historical table...");
       billingRows = await queryBillingData(billingMonth, true);
       if (billingRows.length === 0) {
         throw new Error(`No billing data found for ${billingMonth} in live or historical tables.`);
@@ -368,6 +389,8 @@ export async function processBilling(
     } else {
       throw new Error(`No billing data found for ${billingMonth}.`);
     }
+
+    await updateProgress(`Found ${billingRows.length.toLocaleString()} rows. Loading configuration...`);
 
     // Load reference data in parallel.
     const [
@@ -385,6 +408,8 @@ export async function processBilling(
     ]);
 
     const rows = billingRows;
+
+    await updateProgress(`Processing ${rows.length.toLocaleString()} rows — classifying and applying markups...`);
 
     // -----------------------------------------------------------------------
     // Phase 1a: Process each row, compute aggregates.
@@ -445,9 +470,9 @@ export async function processBilling(
       const existing = aggregates.get(aggKey);
 
       if (existing) {
-        existing.quantity += row.usage?.amount ?? 0;
+        existing.quantity += Number(row.usage?.amount ?? 0);
         existing.totalCost += cost;
-        existing.totalCostAtList += row.cost_at_list ?? 0;
+        existing.totalCostAtList += Number(row.cost_at_list ?? 0);
       } else {
         aggregates.set(aggKey, {
           key: {
@@ -459,9 +484,9 @@ export async function processBilling(
             subscriptionType,
             pricingModel: row.cost_type ?? "unknown",
           },
-          quantity: row.usage?.amount ?? 0,
+          quantity: Number(row.usage?.amount ?? 0),
           totalCost: cost,
-          totalCostAtList: row.cost_at_list ?? 0,
+          totalCostAtList: Number(row.cost_at_list ?? 0),
           markupFactor: markup.markupFactor,
           appliedRule: markup.appliedRule,
           revenueAccountCode: markup.revenueAccountCode,
@@ -479,6 +504,8 @@ export async function processBilling(
         totalVoiceCost += cost;
       }
     }
+
+    await updateProgress(`Aggregated into ${aggregates.size} line items. Distributing Voice taxes...`);
 
     // -----------------------------------------------------------------------
     // Phase 1b: Distribute Voice tax proportionally.
@@ -531,6 +558,7 @@ export async function processBilling(
     // Phase 1c: Group aggregates by customer to build invoices.
     // -----------------------------------------------------------------------
 
+    await updateProgress("Grouping by customer...");
     const customerBuckets = new Map<string, AggBucket[]>();
     for (const bucket of aggregates.values()) {
       const existing = customerBuckets.get(bucket.key.customerId) ?? [];
@@ -543,14 +571,17 @@ export async function processBilling(
     let invoiceCount = 0;
     let errorCount = 0;
 
+    await updateProgress(`Writing ${customerBuckets.size} invoices to Firestore...`);
+
     // -----------------------------------------------------------------------
     // Phase 1d: Write invoices and line items to Firestore.
     // -----------------------------------------------------------------------
 
-    // Process customers in batches to avoid Firestore write limits.
+    // Process customers with concurrency to speed up Firestore writes.
     const customerEntries = Array.from(customerBuckets.entries());
+    let writtenCount = 0;
 
-    for (const [customerId, buckets] of customerEntries) {
+    async function writeCustomerInvoice(customerId: string, buckets: AggBucket[]) {
       try {
         const invoiceRef = runRef.collection("invoices").doc();
         const firstBucket = buckets[0];
@@ -663,6 +694,18 @@ export async function processBilling(
         errorCount++;
         console.error(`Error processing customer ${customerId}:`, err);
       }
+
+      writtenCount++;
+      if (writtenCount % 10 === 0 || writtenCount === customerEntries.length) {
+        await updateProgress(`Writing invoices... ${writtenCount}/${customerEntries.length}`);
+      }
+    }
+
+    // Process in parallel batches of 10
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < customerEntries.length; i += BATCH_SIZE) {
+      const batch = customerEntries.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(([cid, buckets]) => writeCustomerInvoice(cid, buckets)));
     }
 
     // -----------------------------------------------------------------------

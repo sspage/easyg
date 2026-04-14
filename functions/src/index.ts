@@ -101,8 +101,8 @@ app.use(
 export const api = onRequest(
   {
     region: REGION,
-    timeoutSeconds: 60,
-    memory: "256MiB",
+    timeoutSeconds: 540,
+    memory: "1GiB",
   },
   app,
 );
@@ -130,7 +130,7 @@ export const processBilling = onRequest(
       return;
     }
 
-    const { billingMonth } = req.body;
+    const { billingMonth, isTestRun, existingRunId } = req.body;
     if (!billingMonth || !/^\d{6}$/.test(billingMonth)) {
       res.status(400).json({
         error: "billingMonth is required and must be in YYYYMM format",
@@ -140,11 +140,24 @@ export const processBilling = onRequest(
 
     try {
       const { processBilling: runProcessBilling } = await import("./billing/process");
-      const runId = await runProcessBilling(billingMonth);
+      const runId = await runProcessBilling(billingMonth, {
+        isTestRun: !!isTestRun,
+        existingRunId: existingRunId || undefined,
+      });
       res.json({ success: true, billingRunId: runId });
     } catch (err) {
       console.error("processBilling error:", err);
       const message = err instanceof Error ? err.message : String(err);
+      // If we have an existing run ID, mark it as failed
+      if (existingRunId) {
+        const { db: firestoreDb } = await import("./config");
+        const { Timestamp: FsTimestamp } = await import("firebase-admin/firestore");
+        await firestoreDb.collection("billingRuns").doc(existingRunId).set({
+          status: "failed",
+          completedAt: FsTimestamp.now(),
+          errorMessage: message,
+        }, { merge: true });
+      }
       res.status(500).json({ error: `Billing processing failed: ${message}` });
     }
   },

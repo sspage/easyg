@@ -420,7 +420,6 @@ body {
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
   font-size: 0.9rem;
 }
 
@@ -462,7 +461,6 @@ body {
   vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .data-table tbody tr:nth-child(even) {
@@ -843,6 +841,105 @@ body {
 }
 
 /* ============================================================
+   Icon Buttons
+   ============================================================ */
+
+.action-icons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: var(--radius-sm);
+  opacity: 0.5;
+  transition: opacity 0.15s, background 0.15s;
+  line-height: 1;
+}
+
+.icon-btn:hover {
+  opacity: 1;
+  background: var(--color-border-light);
+}
+
+.icon-btn-danger:hover {
+  opacity: 1;
+  background: #fee2e2;
+}
+
+/* ============================================================
+   Summary Bar
+   ============================================================ */
+
+.summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  background: var(--color-bg-secondary, #f8fafc);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.summary-stat {
+  color: var(--color-text-secondary);
+}
+
+.summary-stat strong {
+  color: var(--color-text);
+}
+
+/* ============================================================
+   Progress Bar
+   ============================================================ */
+
+.progress-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  width: 100%;
+}
+
+.progress-bar-track {
+  width: 100%;
+  height: 6px;
+  background: var(--color-border-light);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.progress-bar-indeterminate {
+  width: 30%;
+  animation: progressSlide 1.5s ease-in-out infinite;
+}
+
+@keyframes progressSlide {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(250%); }
+  100% { transform: translateX(-100%); }
+}
+
+.progress-text {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+/* ============================================================
    Inline Edit
    ============================================================ */
 
@@ -850,13 +947,26 @@ body {
   cursor: pointer;
   padding: 0.15rem 0.35rem;
   border-radius: var(--radius-sm);
-  border: 1px dashed transparent;
-  transition: border-color 0.15s;
+  border: 1px dashed var(--color-border-light);
+  transition: border-color 0.15s, background 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .editable-cell:hover {
-  border-color: var(--color-border);
-  background: var(--color-bg);
+  border-color: var(--color-primary);
+  background: var(--color-primary-light, #eff6ff);
+}
+
+.edit-icon {
+  font-size: 0.75rem;
+  opacity: 0.3;
+  transition: opacity 0.15s;
+}
+
+.editable-cell:hover .edit-icon {
+  opacity: 0.8;
 }
 
 .inline-edit {

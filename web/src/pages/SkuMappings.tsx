@@ -49,11 +49,22 @@ export default function SkuMappings(): React.ReactElement {
     if (!editingCell) return;
     try {
       const update: Record<string, string | number | null> = {};
-      update[editingCell.field] = editValue;
+      if (editingCell.field === "specialMarkup") {
+        if (editValue === "" || editValue === "0") {
+          update.specialMarkup = null;
+        } else {
+          const multiplier = parseFloat(editValue);
+          if (isNaN(multiplier)) throw new Error("Invalid number");
+          update.specialMarkup = multiplier - 1; // Convert 1.25x display to 0.25 storage
+        }
+      } else {
+        update[editingCell.field] = editValue;
+      }
       await updateSkuMapping(editingCell.id, update as Partial<SkuMapping>);
+      const storedValue = editingCell.field === "specialMarkup" ? update.specialMarkup : editValue;
       setSkus((prev) =>
         prev.map((s) =>
-          s.id === editingCell.id ? { ...s, [editingCell.field]: editValue } : s
+          s.id === editingCell.id ? { ...s, [editingCell.field]: storedValue } : s
         )
       );
       setEditingCell(null);
@@ -123,9 +134,15 @@ export default function SkuMappings(): React.ReactElement {
     );
   });
 
-  function renderEditableCell(sku: SkuMapping, field: "revenueAccountCode" | "cosAccountCode") {
+  function renderEditableCell(sku: SkuMapping, field: "revenueAccountCode" | "cosAccountCode" | "specialMarkup") {
     const isEditing = editingCell?.id === sku.id && editingCell?.field === field;
-    const value = sku[field];
+    const rawValue = sku[field];
+    const displayValue = field === "specialMarkup"
+      ? (rawValue != null ? `${(1 + Number(rawValue)).toFixed(4)}x` : "")
+      : String(rawValue ?? "");
+    const editInitValue = field === "specialMarkup"
+      ? (rawValue != null ? String(1 + Number(rawValue)) : "")
+      : String(rawValue ?? "");
 
     if (isEditing) {
       return (
@@ -137,22 +154,24 @@ export default function SkuMappings(): React.ReactElement {
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={handleEditKeyDown}
             onBlur={saveEdit}
+            placeholder={field === "specialMarkup" ? "e.g. 1.25" : "Account code"}
             autoFocus
           />
         </div>
       );
     }
 
+    const isEmpty = rawValue == null || rawValue === "";
     return (
       <span
-        className={`editable-cell ${!value ? "text-warning" : ""}`}
+        className={`editable-cell ${isEmpty ? "text-warning" : ""}`}
         onClick={(e) => {
           e.stopPropagation();
-          startEdit(sku.id, field, value || "");
+          startEdit(sku.id, field, editInitValue);
         }}
         title="Click to edit"
       >
-        {value || "(not set)"}
+        {displayValue || "(not set)"} <span className="edit-icon">&#9998;</span>
       </span>
     );
   }
@@ -166,7 +185,14 @@ export default function SkuMappings(): React.ReactElement {
         <span className="mono-text">{row.id}</span>
       ),
     },
-    { key: "skuName", header: "SKU Name", sortable: true },
+    {
+      key: "skuName",
+      header: "SKU Name",
+      sortable: true,
+      render: (row: SkuMapping) => (
+        <span title={row.skuName} style={{ cursor: "help" }}>{row.skuName}</span>
+      ),
+    },
     { key: "category", header: "Category", sortable: true },
     {
       key: "revenueAccountCode",
@@ -182,8 +208,7 @@ export default function SkuMappings(): React.ReactElement {
       key: "specialMarkup",
       header: "Special Markup",
       sortable: true,
-      render: (row: SkuMapping) =>
-        row.specialMarkup != null ? `${(1 + row.specialMarkup).toFixed(4)}x` : "\u2014",
+      render: (row: SkuMapping) => renderEditableCell(row, "specialMarkup"),
     },
     {
       key: "isActive",

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import {
   listBillingRuns,
   getBillingRun,
+  deleteBillingRun,
   processBilling,
   sendToXero,
   batchSendToCustomers,
@@ -10,22 +11,28 @@ import {
   LineItem,
 } from "../services/api";
 import DataTable, { Column } from "../components/DataTable";
+import Modal from "../components/Modal";
 import StatusBadge from "../components/StatusBadge";
 import LoadingSpinner from "../components/LoadingSpinner";
 
-function formatCurrency(amount: number): string {
+function formatCurrency(amount: number | null | undefined): string {
+  if (amount == null) return "$0.00";
   return "$" + amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function formatPercent(value: number): string {
+function formatPercent(value: number | null | undefined): string {
+  if (value == null) return "0.00%";
   return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
 }
 
 function generateMonthOptions(): string[] {
   const months: string[] = [];
   const now = new Date();
-  for (let i = 0; i < 12; i++) {
+  // Data available from Dec 2025 onward
+  const earliest = new Date(2025, 11, 1); // Dec 2025
+  for (let i = 0; i < 24; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    if (d < earliest) break;
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
     months.push(`${y}-${m}`);
@@ -33,8 +40,18 @@ function generateMonthOptions(): string[] {
   return months;
 }
 
-function phaseVariant(phase: string): "info" | "warning" | "success" {
+function displayCustomer(invoice: Invoice): string {
+  // Show domain if available, otherwise extract short ID from resource name
+  if (invoice.customerDomain) return invoice.customerDomain;
+  const name = invoice.customerName || invoice.customerId || "";
+  const match = name.match(/\/([^/]+)$/);
+  return match ? match[1] : name;
+}
+
+function phaseVariant(phase: string): "info" | "warning" | "success" | "neutral" {
   switch (phase) {
+    case "PROCESSING":
+      return "neutral";
     case "PROCESSED":
       return "info";
     case "REVIEWED":
@@ -85,6 +102,8 @@ export default function Billing(): React.ReactElement {
   const [sendingToXero, setSendingToXero] = useState(false);
   const [batchSending, setBatchSending] = useState(false);
   const [isTestRun, setIsTestRun] = useState(false);
+  const [viewModalRun, setViewModalRun] = useState<BillingRun | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
@@ -104,21 +123,47 @@ export default function Billing(): React.ReactElement {
     loadRuns();
   }, [loadRuns]);
 
+  // Poll for run list updates while any run is in "running" state
+  const hasRunningRuns = runs.some((r) => r.status === "running") || processing || sendingToXero || batchSending;
+  useEffect(() => {
+    if (!hasRunningRuns) return;
+    const interval = setInterval(async () => {
+      const updated = await listBillingRuns();
+      setRuns(updated);
+      // Only update activeRun from polling if it's still running (no detailed data loaded yet).
+      // Once the user clicks "View" and loads invoices, don't overwrite with the summary-only list data.
+      if (activeRun && activeRun.status === "running") {
+        const match = updated.find((r) => r.id === activeRun.id);
+        if (match) {
+          // Preserve invoices if we already loaded them
+          if (activeRun.invoices) {
+            setActiveRun({ ...match, invoices: activeRun.invoices });
+          } else {
+            setActiveRun(match);
+          }
+        }
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [hasRunningRuns, activeRun]);
+
   async function handleProcess() {
     setProcessing(true);
     setError(null);
     setActionMessage(null);
     try {
-      // Convert YYYY-MM to YYYYMM for the backend
       const run = await processBilling(selectedMonth.replace("-", ""), { isTestRun });
       setActiveRun(run);
-      const label = isTestRun ? "Test run" : "Billing processed";
-      setActionMessage(`${label} for ${selectedMonth}. ${run.summary.invoiceCount} invoices generated.`);
-      await loadRuns();
+      // Immediately refresh runs so the new run appears in the list and polling starts
+      const updatedRuns = await listBillingRuns();
+      setRuns(updatedRuns);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Processing failed");
     } finally {
       setProcessing(false);
+      // Always refresh runs so failed runs are visible too
+      const finalRuns = await listBillingRuns();
+      setRuns(finalRuns);
     }
   }
 
@@ -136,6 +181,7 @@ export default function Billing(): React.ReactElement {
       setError(err instanceof Error ? err.message : "Failed to send to Xero");
     } finally {
       setSendingToXero(false);
+      await loadRuns();
     }
   }
 
@@ -153,17 +199,37 @@ export default function Billing(): React.ReactElement {
       setError(err instanceof Error ? err.message : "Batch send failed");
     } finally {
       setBatchSending(false);
+      await loadRuns();
+    }
+  }
+
+  async function handleDeleteRun(run: BillingRun) {
+    if (!confirm(`Delete billing run for ${run.billingPeriod}? This cannot be undone.`)) return;
+    try {
+      await deleteBillingRun(run.id);
+      if (activeRun?.id === run.id) setActiveRun(null);
+      if (viewModalRun?.id === run.id) setViewModalRun(null);
+      await loadRuns();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete run");
     }
   }
 
   async function handleViewRun(run: BillingRun) {
+    setViewLoading(true);
+    setViewModalRun(run);
+    setActiveRun(run);
     try {
       const detailed = await getBillingRun(run.id);
+      setViewModalRun(detailed);
       setActiveRun(detailed);
       setExpandedInvoices(new Set());
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load billing run details");
+      setViewModalRun(null);
+    } finally {
+      setViewLoading(false);
     }
   }
 
@@ -210,12 +276,12 @@ export default function Billing(): React.ReactElement {
         </button>
       ),
     },
-    { key: "customerName", header: "Customer", sortable: true },
     {
-      key: "customerDomain",
-      header: "Domain",
+      key: "customerDisplay",
+      header: "Customer",
       sortable: true,
-      render: (row: Invoice) => row.customerDomain ?? "\u2014",
+      render: (row: Invoice) => displayCustomer(row),
+      getValue: (row: Invoice) => displayCustomer(row),
     },
     {
       key: "phase",
@@ -317,9 +383,20 @@ export default function Billing(): React.ReactElement {
       header: "",
       width: "80px",
       render: (row: BillingRun) => (
-        <button className="btn btn-sm btn-secondary" onClick={() => handleViewRun(row)}>
-          View
-        </button>
+        <div className="action-icons">
+          <button
+            className="icon-btn"
+            onClick={(e) => { e.stopPropagation(); handleViewRun(row); }}
+            title="View details"
+          >&#128065;</button>
+          {row.status !== "running" && (
+            <button
+              className="icon-btn icon-btn-danger"
+              onClick={(e) => { e.stopPropagation(); handleDeleteRun(row); }}
+              title="Delete run"
+            >&#128465;</button>
+          )}
+        </div>
       ),
     },
   ];
@@ -427,87 +504,68 @@ export default function Billing(): React.ReactElement {
       </div>
 
       {activeRun && (
-        <>
-          <div className="card mt-2">
-            <div className="card-header">
-              <h3>
-                Run: {activeRun.billingPeriod}{" "}
-                <StatusBadge variant={statusVariant(activeRun.status)} label={activeRun.status.toUpperCase()} size="sm" />
-                {" "}
-                <StatusBadge variant={phaseVariant(activeRun.phase)} label={activeRun.phase.replace(/_/g, " ")} size="sm" />
-                {activeRun.isTestRun && (
-                  <>
-                    {" "}
-                    <StatusBadge variant="warning" label="TEST RUN" size="sm" />
-                  </>
-                )}
-              </h3>
-              <div className="btn-group">
-                {!activeRun.isTestRun && activeRun.phase === "PROCESSED" && activeRun.status === "completed" && (
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleSendToXero}
-                    disabled={sendingToXero}
-                  >
-                    {sendingToXero ? "Sending..." : "Send to Xero (Phase 3)"}
-                  </button>
-                )}
-                {!activeRun.isTestRun && activeRun.phase === "SENT_TO_XERO" && activeRun.status === "completed" && (
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleBatchSend}
-                    disabled={batchSending}
-                  >
-                    {batchSending ? "Approving..." : "Approve All in Xero"}
-                  </button>
-                )}
-                {activeRun.isTestRun && activeRun.status === "completed" && (
-                  <span className="text-muted">Test run — review only, cannot send to Xero</span>
-                )}
-              </div>
-            </div>
-            <div className="card-body">
-              {summaryTotals && (
-                <div className="summary-bar">
-                  <div className="summary-item">
-                    <span className="summary-label">Invoices</span>
-                    <span className="summary-value">{summaryTotals.count}</span>
-                  </div>
-                  <div className="summary-item">
-                    <span className="summary-label">Total Revenue</span>
-                    <span className="summary-value">{formatCurrency(summaryTotals.revenue)}</span>
-                  </div>
-                  <div className="summary-item">
-                    <span className="summary-label">Total Cost</span>
-                    <span className="summary-value">{formatCurrency(summaryTotals.cost)}</span>
-                  </div>
-                  <div className="summary-item">
-                    <span className="summary-label">Total Margin</span>
-                    <span className="summary-value">{formatCurrency(summaryTotals.margin)}</span>
-                  </div>
-                  <div className="summary-item">
-                    <span className="summary-label">Margin %</span>
-                    <span className="summary-value">
-                      {summaryTotals.revenue > 0
-                        ? formatPercent((summaryTotals.margin / summaryTotals.revenue) * 100)
-                        : "\u2014"}
-                    </span>
-                  </div>
-                </div>
+        <div className="card mt-2">
+          <div className="card-header">
+            <h3>
+              Run: {activeRun.billingPeriod}{" "}
+              <StatusBadge variant={statusVariant(activeRun.status)} label={activeRun.status.toUpperCase()} size="sm" />
+              {" "}
+              <StatusBadge variant={phaseVariant(activeRun.phase)} label={activeRun.phase.replace(/_/g, " ")} size="sm" />
+              {activeRun.isTestRun && (
+                <>
+                  {" "}
+                  <StatusBadge variant="warning" label="TEST RUN" size="sm" />
+                </>
               )}
-
-              <DataTable<Invoice>
-                columns={invoiceColumns}
-                data={invoices}
-                keyField="id"
-                emptyMessage="No invoices in this run"
-                expandedRows={expandedInvoices}
-                expandedRowRender={(row) => renderLineItems(row)}
-                onRowClick={(row) => toggleInvoiceExpand(row.id)}
-              />
+            </h3>
+            <div className="btn-group">
+              {!activeRun.isTestRun && activeRun.phase === "PROCESSED" && activeRun.status === "completed" && (
+                <button className="btn btn-primary" onClick={handleSendToXero} disabled={sendingToXero}>
+                  {sendingToXero ? "Sending..." : "Send to Xero"}
+                </button>
+              )}
+              {!activeRun.isTestRun && activeRun.phase === "SENT_TO_XERO" && activeRun.status === "completed" && (
+                <button className="btn btn-primary" onClick={handleBatchSend} disabled={batchSending}>
+                  {batchSending ? "Approving..." : "Approve All in Xero"}
+                </button>
+              )}
+              {activeRun.status === "completed" && (
+                <button className="btn btn-secondary" onClick={() => handleViewRun(activeRun)}>
+                  View Details
+                </button>
+              )}
             </div>
           </div>
-        </>
+          <div className="card-body">
+            {activeRun.status === "running" && (
+              <div className="progress-bar-container">
+                <div className="progress-bar-track">
+                  <div className="progress-bar-fill progress-bar-indeterminate"></div>
+                </div>
+                <span className="progress-text">
+                  {activeRun.progress || "Starting..."}
+                </span>
+              </div>
+            )}
+            {activeRun.status === "completed" && activeRun.summary && (
+              <div className="summary-bar">
+                <span className="summary-stat"><strong>{activeRun.summary.invoiceCount}</strong> invoices</span>
+                <span className="summary-stat">Cost: <strong>{formatCurrency(activeRun.summary.totalCost)}</strong></span>
+                <span className="summary-stat">Revenue: <strong>{formatCurrency(activeRun.summary.totalRevenue)}</strong></span>
+                <span className="summary-stat">Margin: <strong>{formatCurrency(activeRun.summary.totalMargin)}</strong></span>
+                {activeRun.summary.totalRevenue > 0 && (
+                  <span className="summary-stat">
+                    <strong>{formatPercent((activeRun.summary.totalMargin / activeRun.summary.totalRevenue) * 100)}</strong>
+                  </span>
+                )}
+                {activeRun.isTestRun && <span className="text-muted">Test run — review only</span>}
+              </div>
+            )}
+            {activeRun.status === "failed" && (
+              <div className="alert alert-error">Run failed. Check logs for details.</div>
+            )}
+          </div>
+        </div>
       )}
 
       <div className="card mt-2">
@@ -523,6 +581,67 @@ export default function Billing(): React.ReactElement {
           />
         </div>
       </div>
+
+      {viewModalRun && (
+        <Modal open={true} title={`Billing Run: ${viewModalRun.billingPeriod}${viewModalRun.isTestRun ? " (TEST)" : ""}`} onClose={() => setViewModalRun(null)} width="900px">
+          {viewLoading ? (
+            <LoadingSpinner message="Loading run details..." />
+          ) : (
+            <>
+              <div className="summary-bar mb-2">
+                <StatusBadge variant={statusVariant(viewModalRun.status)} label={viewModalRun.status.toUpperCase()} size="sm" />
+                <StatusBadge variant={phaseVariant(viewModalRun.phase)} label={viewModalRun.phase.replace(/_/g, " ")} size="sm" />
+                {viewModalRun.isTestRun && <StatusBadge variant="warning" label="TEST" size="sm" />}
+                <span className="summary-stat"><strong>{viewModalRun.summary?.invoiceCount ?? 0}</strong> invoices</span>
+                <span className="summary-stat">Cost: <strong>{formatCurrency(viewModalRun.summary?.totalCost)}</strong></span>
+                <span className="summary-stat">Revenue: <strong>{formatCurrency(viewModalRun.summary?.totalRevenue)}</strong></span>
+                <span className="summary-stat">Margin: <strong>{formatCurrency(viewModalRun.summary?.totalMargin)}</strong></span>
+              </div>
+
+              {viewModalRun.invoices && viewModalRun.invoices.length > 0 ? (
+                <div className="table-wrapper" style={{ maxHeight: "60vh", overflowY: "auto" }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Customer</th>
+                        <th>Items</th>
+                        <th>Cost</th>
+                        <th>Revenue</th>
+                        <th>Margin</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {viewModalRun.invoices.map((inv) => (
+                        <React.Fragment key={inv.id}>
+                          <tr className={`clickable ${expandedInvoices.has(inv.id) ? "expanded" : ""}`}
+                              onClick={() => toggleInvoiceExpand(inv.id)}>
+                            <td>{displayCustomer(inv)}</td>
+                            <td>{inv.lineItemCount}</td>
+                            <td>{formatCurrency(inv.totalCost)}</td>
+                            <td>{formatCurrency(inv.totalRevenue)}</td>
+                            <td>{formatCurrency(inv.totalMargin)}</td>
+                            <td><StatusBadge variant={invoicePhaseVariant(inv.phase)} label={inv.phase.replace(/_/g, " ")} size="sm" /></td>
+                          </tr>
+                          {expandedInvoices.has(inv.id) && (
+                            <tr className="expanded-row">
+                              <td colSpan={6}>
+                                {renderLineItems(inv)}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-muted">No invoice details available.</p>
+              )}
+            </>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }

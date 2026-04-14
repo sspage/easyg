@@ -48,7 +48,7 @@ export interface SkuMapping {
   updatedAt: Timestamp;
 }
 
-export type BillingRunPhase = "PROCESSED" | "REVIEWED" | "SENT_TO_XERO";
+export type BillingRunPhase = "PROCESSING" | "PROCESSED" | "REVIEWED" | "SENT_TO_XERO";
 export type BillingRunStatus = "running" | "completed" | "failed";
 export type InvoicePhase = "DRAFT" | "SENT_TO_XERO" | "APPROVED" | "SENT_TO_CUSTOMER";
 
@@ -57,6 +57,7 @@ export interface BillingRun {
   phase: BillingRunPhase;
   status: BillingRunStatus;
   isTestRun: boolean;
+  progress?: string;
   startedAt: Timestamp;
   completedAt: Timestamp | null;
   sentToXeroAt: Timestamp | null;

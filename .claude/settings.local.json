@@ -63,7 +63,11 @@
       "Bash(bq cp:*)",
       "Bash(bq rm:*)",
       "Bash(gcloud storage:*)",
-      "Bash(gcloud services:*)"
+      "Bash(gcloud services:*)",
+      "Bash(gcloud functions:*)",
+      "Bash(GOOGLE_APPLICATION_CREDENTIALS=\"\" gcloud firestore documents list --collection-ids=billingRuns --project=white-dispatch-481617-f8 --limit=10)",
+      "Bash(python3 -c ':*)",
+      "Bash(ls:*)"
     ]
   }
 }

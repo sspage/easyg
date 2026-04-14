@@ -147,9 +147,10 @@ export interface BillingRunSummary {
 export interface BillingRun {
   id: string;
   billingPeriod: string;
-  phase: "PROCESSED" | "REVIEWED" | "SENT_TO_XERO";
+  phase: "PROCESSING" | "PROCESSED" | "REVIEWED" | "SENT_TO_XERO";
   status: "running" | "completed" | "failed";
   isTestRun: boolean;
+  progress?: string;
   startedAt: string;
   completedAt: string | null;
   sentToXeroAt: string | null;
@@ -303,6 +304,10 @@ export async function listBillingRuns(): Promise<BillingRun[]> {
 
 export async function getBillingRun(id: string): Promise<BillingRun> {
   return request<BillingRun>("GET", `/billing-runs/${id}`);
+}
+
+export async function deleteBillingRun(id: string): Promise<void> {
+  return request<void>("DELETE", `/billing-runs/${id}`);
 }
 
 export async function processBilling(

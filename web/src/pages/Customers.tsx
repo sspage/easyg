@@ -192,7 +192,13 @@ export default function Customers(): React.ReactElement {
         </button>
       ),
     },
-    { key: "googleCustomerName", header: "Customer Name", sortable: true },
+    {
+      key: "displayName",
+      header: "Customer",
+      sortable: true,
+      render: (row: Customer) => row.domain || row.id,
+      getValue: (row: Customer) => row.domain || row.id,
+    },
     {
       key: "domain",
       header: "Domain",
