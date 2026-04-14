@@ -420,6 +420,7 @@ body {
 .data-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 0.9rem;
 }
 
@@ -459,6 +460,9 @@ body {
   padding: 0.6rem 0.75rem;
   border-bottom: 1px solid var(--color-border-light);
   vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .data-table tbody tr:nth-child(even) {
@@ -485,9 +489,16 @@ body {
 }
 
 .expanded-row td {
-  padding: 0;
+  padding: 1rem;
   background: var(--color-bg);
+  border-bottom: 2px solid var(--color-border);
 }
+
+.expanded-row td > * {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 
 .expanded-content {
   padding: 1.25rem;
@@ -779,10 +790,6 @@ body {
   cursor: pointer;
 }
 
-.toggle-input {
-  display: none;
-}
-
 .toggle-switch {
   width: 44px;
   height: 24px;
@@ -791,9 +798,24 @@ body {
   position: relative;
   transition: background 0.2s;
   flex-shrink: 0;
+  display: inline-block;
 }
 
-.toggle-switch::after {
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  transition: background 0.2s;
+}
+
+.toggle-slider::after {
   content: "";
   width: 18px;
   height: 18px;
@@ -806,11 +828,11 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
-.toggle-input:checked + .toggle-switch {
+.toggle-switch input:checked ~ .toggle-slider {
   background: var(--color-primary);
 }
 
-.toggle-input:checked + .toggle-switch::after {
+.toggle-switch input:checked ~ .toggle-slider::after {
   transform: translateX(20px);
 }
 

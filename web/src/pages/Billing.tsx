@@ -398,15 +398,18 @@ export default function Billing(): React.ReactElement {
                 ))}
               </select>
             </div>
-            <div className="form-group">
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={isTestRun}
-                  onChange={(e) => setIsTestRun(e.target.checked)}
-                  disabled={processing}
-                />
-                Test Run (calculation only, cannot send to Xero)
+            <div className="form-group" title="Run calculations without sending to Xero. Use to verify billing against past periods.">
+              <label className="toggle-label">
+                <span className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={isTestRun}
+                    onChange={(e) => setIsTestRun(e.target.checked)}
+                    disabled={processing}
+                  />
+                  <span className="toggle-slider"></span>
+                </span>
+                <span className="toggle-text">Test Mode</span>
               </label>
             </div>
             <div className="form-group form-actions-inline">

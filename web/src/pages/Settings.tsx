@@ -177,13 +177,14 @@ export default function Settings(): React.ReactElement {
           <div className="form-stack">
             <div className="form-group">
               <label className="toggle-label">
-                <input
-                  type="checkbox"
-                  className="toggle-input"
-                  checked={autoScheduleEnabled}
-                  onChange={(e) => setAutoScheduleEnabled(e.target.checked)}
-                />
-                <span className="toggle-switch" />
+                <span className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={autoScheduleEnabled}
+                    onChange={(e) => setAutoScheduleEnabled(e.target.checked)}
+                  />
+                  <span className="toggle-slider"></span>
+                </span>
                 <span className="toggle-text">
                   {autoScheduleEnabled ? "Enabled" : "Disabled"}
                 </span>

@@ -240,13 +240,16 @@ export default function SkuMappings(): React.ReactElement {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            checked={filterUnmapped}
-            onChange={(e) => setFilterUnmapped(e.target.checked)}
-          />
-          Show unmapped only
+        <label className="toggle-label" title="Filter to show only SKUs missing account code mappings">
+          <span className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={filterUnmapped}
+              onChange={(e) => setFilterUnmapped(e.target.checked)}
+            />
+            <span className="toggle-slider"></span>
+          </span>
+          <span className="toggle-text">Unmapped only</span>
         </label>
       </div>
 
